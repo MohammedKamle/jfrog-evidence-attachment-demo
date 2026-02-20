@@ -1,0 +1,9 @@
+node_modules/
+test-results/
+coverage/
+*.pem
+*.log
+.DS_Store
+build-metadata
+bundle-spec.json
+*.evidence.json

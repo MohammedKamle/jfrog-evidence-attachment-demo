@@ -1,0 +1,31 @@
+{
+  "name": "evidence-demo-app",
+  "version": "1.0.0",
+  "description": "Sample Node.js app for demonstrating JFrog Evidence Attachment with Release Bundles v2",
+  "main": "app/server.js",
+  "scripts": {
+    "start": "node app/server.js",
+    "test": "jest --forceExit --detectOpenHandles",
+    "test:ci": "jest --forceExit --detectOpenHandles --ci --reporters=default --reporters=jest-junit"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/app/**/*.test.js"
+    ]
+  },
+  "jest-junit": {
+    "outputDirectory": "./test-results",
+    "outputName": "junit.xml",
+    "classNameTemplate": "{classname}",
+    "titleTemplate": "{title}"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "jest-junit": "^16.0.0",
+    "supertest": "^7.0.0"
+  }
+}

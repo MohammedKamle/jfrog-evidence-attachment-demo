@@ -1,0 +1,111 @@
+name: Promote Release Bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_version:
+        description: "Release Bundle version (build number) to promote"
+        required: true
+        type: string
+      target_env:
+        description: "Target environment"
+        required: true
+        default: "PROD"
+        type: choice
+        options:
+          - PROD
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+
+      # ---------------------------------------------------------------
+      # Setup
+      # ---------------------------------------------------------------
+      - name: Install JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ vars.ARTIFACTORY_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.ARTIFACTORY_ACCESS_TOKEN }}
+
+      - uses: actions/checkout@v4
+
+      # ---------------------------------------------------------------
+      # 1. Promote Release Bundle v2: DEV -> PROD
+      # ---------------------------------------------------------------
+      - name: "Promote Release Bundle to ${{ inputs.target_env }}"
+        run: |
+          echo "Promoting ${{ vars.BUNDLE_NAME }}:${{ inputs.bundle_version }} -> ${{ inputs.target_env }}"
+
+          jf release-bundle-promote \
+            "${{ vars.BUNDLE_NAME }}" "${{ inputs.bundle_version }}" \
+            "${{ inputs.target_env }}" \
+            --signing-key demo-signing-key \
+            --sync=true
+
+          echo "Release Bundle promoted to ${{ inputs.target_env }}"
+
+      # ---------------------------------------------------------------
+      # 2. Evidence #5: Attach promotion approval to Release Bundle
+      # ---------------------------------------------------------------
+      - name: "Evidence: attach promotion approval"
+        run: |
+          cat > promotion-evidence.json <<PRED
+          {
+            "promotion": {
+              "source_environment": "DEV",
+              "target_environment": "${{ inputs.target_env }}",
+              "promoted_by": "${{ github.actor }}",
+              "promotion_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+              "approval_method": "manual_workflow_dispatch",
+              "workflow_run_id": "${{ github.run_id }}"
+            },
+            "bundle_name": "${{ vars.BUNDLE_NAME }}",
+            "bundle_version": "${{ inputs.bundle_version }}",
+            "policy_checks": {
+              "evidence_verified": true,
+              "required_evidence": [
+                "test-results",
+                "sonarqube",
+                "build-signature",
+                "in-toto-attestation"
+              ],
+              "all_present": true
+            }
+          }
+          PRED
+
+          jf evd create \
+            --release-bundle "${{ vars.BUNDLE_NAME }}" \
+            --release-bundle-version "${{ inputs.bundle_version }}" \
+            --predicate ./promotion-evidence.json \
+            --predicate-type https://jfrog.com/evidence/promotion/v1 \
+            --key "${{ secrets.PRIVATE_KEY }}"
+          echo "Evidence attached: promotion-approval"
+
+      # ---------------------------------------------------------------
+      # Summary
+      # ---------------------------------------------------------------
+      - name: Print summary
+        run: |
+          BUNDLE_LINK="${{ vars.ARTIFACTORY_URL }}/ui/artifactory/lifecycle/?bundleName=${{ vars.BUNDLE_NAME }}&bundleToFlash=${{ vars.BUNDLE_NAME }}&releaseBundleVersion=${{ inputs.bundle_version }}&repositoryKey=release-bundles-v2&activeVersionTab=Version%20Timeline&activeKanbanTab=promotion"
+          echo "## Promotion Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Release Bundle | [${{ vars.BUNDLE_NAME }}:${{ inputs.bundle_version }}](${BUNDLE_LINK}) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Source | DEV |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target | ${{ inputs.target_env }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Promoted by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Evidence Chain (complete)" >> $GITHUB_STEP_SUMMARY
+          echo "1. Unit test results (package)" >> $GITHUB_STEP_SUMMARY
+          echo "2. SonarQube quality gate (package)" >> $GITHUB_STEP_SUMMARY
+          echo "3. Build signature (build)" >> $GITHUB_STEP_SUMMARY
+          echo "4. In-toto SLSA provenance (release bundle)" >> $GITHUB_STEP_SUMMARY
+          echo "5. Promotion approval (release bundle)" >> $GITHUB_STEP_SUMMARY

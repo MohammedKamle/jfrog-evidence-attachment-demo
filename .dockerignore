@@ -1,0 +1,11 @@
+node_modules
+test-results
+.github
+scripts
+policy
+*.md
+*.pem
+.git
+.gitignore
+.dockerignore
+sonar-project.properties

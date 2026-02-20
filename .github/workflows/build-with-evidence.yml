@@ -1,0 +1,289 @@
+name: Build with Evidence
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  DOCKER_REPO_DEV: evidence-demo-docker-dev
+  DOCKER_REPO_DEV_LOCAL: evidence-demo-docker-dev-local
+  DOCKER_VIRTUAL: evidence-demo-docker-dev-virtual
+  GENERIC_REPO: evidence-demo-generic-dev
+  IMAGE_NAME: evidence-demo-app
+
+jobs:
+  build-test-publish:
+    runs-on: ubuntu-latest
+    steps:
+
+      # ---------------------------------------------------------------
+      # Setup
+      # ---------------------------------------------------------------
+      - name: Install JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ vars.ARTIFACTORY_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.ARTIFACTORY_ACCESS_TOKEN }}
+
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # ---------------------------------------------------------------
+      # 1. Run Unit Tests and produce JUnit XML report
+      # ---------------------------------------------------------------
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm run test:ci
+
+      - name: Prepare test evidence predicate
+        run: |
+          TEST_PASS=$(grep -o 'tests="[^"]*"' test-results/junit.xml | head -1 | grep -o '[0-9]*')
+          TEST_FAIL=$(grep -o 'failures="[^"]*"' test-results/junit.xml | head -1 | grep -o '[0-9]*')
+          cat > test-evidence.json <<PRED
+          {
+            "test_framework": "jest",
+            "test_type": "unit",
+            "total_tests": ${TEST_PASS:-0},
+            "failures": ${TEST_FAIL:-0},
+            "result": "$([ "${TEST_FAIL:-0}" = "0" ] && echo PASSED || echo FAILED)",
+            "report_file": "test-results/junit.xml",
+            "actor": "${{ github.actor }}",
+            "run_id": "${{ github.run_id }}",
+            "commit_sha": "${{ github.sha }}",
+            "date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          }
+          PRED
+
+      # ---------------------------------------------------------------
+      # 2. Simulate SonarQube scan and produce quality gate predicate
+      # ---------------------------------------------------------------
+      - name: Simulate SonarQube quality gate
+        run: |
+          cat > sonar-evidence.json <<PRED
+          {
+            "sonarqube": {
+              "project_key": "evidence-demo-app",
+              "quality_gate_status": "OK",
+              "conditions": [
+                { "metric": "new_reliability_rating",   "status": "OK", "value": "1" },
+                { "metric": "new_security_rating",      "status": "OK", "value": "1" },
+                { "metric": "new_maintainability_rating","status": "OK", "value": "1" },
+                { "metric": "new_coverage",             "status": "OK", "value": "85.3" },
+                { "metric": "new_duplicated_lines_density","status": "OK", "value": "1.2" }
+              ],
+              "analysis_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+            },
+            "actor": "${{ github.actor }}",
+            "commit_sha": "${{ github.sha }}"
+          }
+          PRED
+
+      # ---------------------------------------------------------------
+      # 3. Build and Push Docker image
+      # ---------------------------------------------------------------
+      - name: Log in to Artifactory Docker Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.ARTIFACTORY_URL }}
+          username: ${{ secrets.JF_USER }}
+          password: ${{ secrets.ARTIFACTORY_ACCESS_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          install: true
+
+      - name: Build and push Docker image
+        run: |
+          URL=$(echo "${{ vars.ARTIFACTORY_URL }}" | sed 's|^https://||')
+          REPO_URL="${URL}/${DOCKER_VIRTUAL}"
+          IMAGE_TAG="${REPO_URL}/${IMAGE_NAME}:${{ github.run_number }}"
+
+          docker build -f Dockerfile . \
+            --tag "${IMAGE_TAG}" \
+            --output=type=image --platform linux/amd64 \
+            --metadata-file=build-metadata --push
+
+          jfrog rt build-docker-create ${DOCKER_REPO_DEV} \
+            --image-file build-metadata \
+            --build-name "${{ vars.BUILD_NAME }}" \
+            --build-number "${{ github.run_number }}"
+
+      # ---------------------------------------------------------------
+      # 4. Evidence #1: Attach unit test results to Docker package
+      # ---------------------------------------------------------------
+      - name: "Evidence: attach unit test results to package"
+        run: |
+          jf evd create \
+            --package-name "${IMAGE_NAME}" \
+            --package-version "${{ github.run_number }}" \
+            --package-repo-name "${DOCKER_REPO_DEV_LOCAL}" \
+            --key "${{ secrets.PRIVATE_KEY }}" \
+            --predicate ./test-evidence.json \
+            --predicate-type https://jfrog.com/evidence/test-results/v1
+          echo "Evidence attached: unit-test-results"
+
+      # ---------------------------------------------------------------
+      # 5. Evidence #2: Attach SonarQube quality gate to Docker package
+      # ---------------------------------------------------------------
+      - name: "Evidence: attach SonarQube results to package"
+        run: |
+          jf evd create \
+            --package-name "${IMAGE_NAME}" \
+            --package-version "${{ github.run_number }}" \
+            --package-repo-name "${DOCKER_REPO_DEV_LOCAL}" \
+            --key "${{ secrets.PRIVATE_KEY }}" \
+            --predicate ./sonar-evidence.json \
+            --predicate-type https://jfrog.com/evidence/sonarqube/v1
+          echo "Evidence attached: sonarqube-quality-gate"
+
+      # ---------------------------------------------------------------
+      # 6. Upload test report as a generic artifact (optional)
+      # ---------------------------------------------------------------
+      - name: Upload test report artifact
+        run: |
+          jf rt upload ./test-results/junit.xml \
+            "${GENERIC_REPO}/test-reports/${{ github.run_number }}/" \
+            --build-name "${{ vars.BUILD_NAME }}" \
+            --build-number "${{ github.run_number }}"
+
+      # ---------------------------------------------------------------
+      # 7. Publish Build Info
+      # ---------------------------------------------------------------
+      - name: Publish build info
+        run: |
+          jfrog rt build-publish \
+            "${{ vars.BUILD_NAME }}" "${{ github.run_number }}"
+
+      # ---------------------------------------------------------------
+      # 8. Evidence #3: Attach build signature to Build
+      # ---------------------------------------------------------------
+      - name: "Evidence: attach build signature"
+        run: |
+          cat > build-signature.json <<PRED
+          {
+            "build_name": "${{ vars.BUILD_NAME }}",
+            "build_number": "${{ github.run_number }}",
+            "builder": "github-actions",
+            "workflow": "${{ github.workflow }}",
+            "run_id": "${{ github.run_id }}",
+            "actor": "${{ github.actor }}",
+            "repository": "${{ github.repository }}",
+            "commit_sha": "${{ github.sha }}",
+            "ref": "${{ github.ref }}",
+            "date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          }
+          PRED
+
+          jf evd create \
+            --build-name "${{ vars.BUILD_NAME }}" \
+            --build-number "${{ github.run_number }}" \
+            --predicate ./build-signature.json \
+            --predicate-type https://jfrog.com/evidence/build-signature/v1 \
+            --key "${{ secrets.PRIVATE_KEY }}"
+          echo "Evidence attached: build-signature"
+
+      # ---------------------------------------------------------------
+      # 9. Create Release Bundle v2 from the Build
+      # ---------------------------------------------------------------
+      - name: Create Release Bundle v2
+        run: |
+          cat > bundle-spec.json <<SPEC
+          {
+            "files": [
+              {
+                "build": "${{ vars.BUILD_NAME }}/${{ github.run_number }}"
+              }
+            ]
+          }
+          SPEC
+
+          jf release-bundle-create \
+            "${{ vars.BUNDLE_NAME }}" "${{ github.run_number }}" \
+            --signing-key demo-signing-key \
+            --spec bundle-spec.json \
+            --sync=true
+          echo "Release Bundle created: ${{ vars.BUNDLE_NAME }}:${{ github.run_number }}"
+
+      # ---------------------------------------------------------------
+      # 10. Evidence #4: Attach in-toto attestation to Release Bundle
+      # ---------------------------------------------------------------
+      - name: "Evidence: attach in-toto attestation to Release Bundle"
+        run: |
+          cat > intoto-attestation.json <<PRED
+          {
+            "_type": "https://in-toto.io/Statement/v1",
+            "subject": [
+              {
+                "name": "${{ vars.BUNDLE_NAME }}",
+                "version": "${{ github.run_number }}"
+              }
+            ],
+            "predicateType": "https://slsa.dev/provenance/v1",
+            "predicate": {
+              "buildDefinition": {
+                "buildType": "https://github.com/actions/runner",
+                "externalParameters": {
+                  "workflow": "${{ github.workflow }}",
+                  "ref": "${{ github.ref }}"
+                },
+                "internalParameters": {
+                  "github_run_id": "${{ github.run_id }}",
+                  "github_run_number": "${{ github.run_number }}"
+                },
+                "resolvedDependencies": [
+                  {
+                    "uri": "git+${{ github.server_url }}/${{ github.repository }}@${{ github.ref }}",
+                    "digest": { "sha1": "${{ github.sha }}" }
+                  }
+                ]
+              },
+              "runDetails": {
+                "builder": { "id": "https://github.com/actions/runner" },
+                "metadata": {
+                  "invocationId": "${{ github.run_id }}",
+                  "startedOn": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+                }
+              }
+            }
+          }
+          PRED
+
+          jf evd create \
+            --release-bundle "${{ vars.BUNDLE_NAME }}" \
+            --release-bundle-version "${{ github.run_number }}" \
+            --predicate ./intoto-attestation.json \
+            --predicate-type https://in-toto.io/attestation/v1 \
+            --key "${{ secrets.PRIVATE_KEY }}"
+          echo "Evidence attached: in-toto attestation to Release Bundle"
+
+      # ---------------------------------------------------------------
+      # Summary
+      # ---------------------------------------------------------------
+      - name: Print summary
+        run: |
+          BUNDLE_LINK="${{ vars.ARTIFACTORY_URL }}/ui/artifactory/lifecycle/?bundleName=${{ vars.BUNDLE_NAME }}&bundleToFlash=${{ vars.BUNDLE_NAME }}&releaseBundleVersion=${{ github.run_number }}&repositoryKey=release-bundles-v2&activeVersionTab=Version%20Timeline&activeKanbanTab=promotion"
+          echo "## Build & Evidence Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Image | \`${IMAGE_NAME}:${{ github.run_number }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | \`${{ vars.BUILD_NAME }}/${{ github.run_number }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Release Bundle | [${{ vars.BUNDLE_NAME }}:${{ github.run_number }}](${BUNDLE_LINK}) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Evidence Attached" >> $GITHUB_STEP_SUMMARY
+          echo "1. Unit test results -> Docker package" >> $GITHUB_STEP_SUMMARY
+          echo "2. SonarQube quality gate -> Docker package" >> $GITHUB_STEP_SUMMARY
+          echo "3. Build signature -> Build Info" >> $GITHUB_STEP_SUMMARY
+          echo "4. In-toto SLSA provenance -> Release Bundle v2" >> $GITHUB_STEP_SUMMARY

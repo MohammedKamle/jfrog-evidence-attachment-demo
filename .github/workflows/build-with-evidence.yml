@@ -10,7 +10,6 @@ permissions:
   contents: read
 
 env:
-  DOCKER_REPO_DEV: evidence-demo-docker-dev
   DOCKER_REPO_DEV_LOCAL: evidence-demo-docker-dev-local
   DOCKER_VIRTUAL: evidence-demo-docker-dev-virtual
   GENERIC_REPO: evidence-demo-generic-dev
@@ -115,7 +114,7 @@ jobs:
             --output=type=image --platform linux/amd64 \
             --metadata-file=build-metadata --push
 
-          jfrog rt build-docker-create ${DOCKER_REPO_DEV} \
+          jfrog rt build-docker-create ${DOCKER_REPO_DEV_LOCAL} \
             --image-file build-metadata \
             --build-name "${{ vars.BUILD_NAME }}" \
             --build-number "${{ github.run_number }}"

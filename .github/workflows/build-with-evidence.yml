@@ -14,6 +14,7 @@ env:
   DOCKER_VIRTUAL: evidence-demo-docker-dev-virtual
   GENERIC_REPO: evidence-demo-generic-dev
   IMAGE_NAME: evidence-demo-app
+  EVIDENCE_KEY_ALIAS: evidence-signing-key
 
 jobs:
   build-test-publish:
@@ -131,6 +132,7 @@ jobs:
             --package-version "${{ github.run_number }}" \
             --package-repo-name "${DOCKER_REPO_DEV_LOCAL}" \
             --key "${{ secrets.PRIVATE_KEY }}" \
+            --key-alias "${EVIDENCE_KEY_ALIAS}" \
             --predicate ./test-evidence.json \
             --predicate-type https://jfrog.com/evidence/test-results/v1
           echo "Evidence attached: unit-test-results"
@@ -145,6 +147,7 @@ jobs:
             --package-version "${{ github.run_number }}" \
             --package-repo-name "${DOCKER_REPO_DEV_LOCAL}" \
             --key "${{ secrets.PRIVATE_KEY }}" \
+            --key-alias "${EVIDENCE_KEY_ALIAS}" \
             --predicate ./sonar-evidence.json \
             --predicate-type https://jfrog.com/evidence/sonarqube/v1
           echo "Evidence attached: sonarqube-quality-gate"
@@ -192,7 +195,8 @@ jobs:
             --build-number "${{ github.run_number }}" \
             --predicate ./build-signature.json \
             --predicate-type https://jfrog.com/evidence/build-signature/v1 \
-            --key "${{ secrets.PRIVATE_KEY }}"
+            --key "${{ secrets.PRIVATE_KEY }}" \
+            --key-alias "${EVIDENCE_KEY_ALIAS}"
           echo "Evidence attached: build-signature"
 
       # ---------------------------------------------------------------
@@ -266,7 +270,8 @@ jobs:
             --release-bundle-version "${{ github.run_number }}" \
             --predicate ./intoto-attestation.json \
             --predicate-type https://in-toto.io/attestation/v1 \
-            --key "${{ secrets.PRIVATE_KEY }}"
+            --key "${{ secrets.PRIVATE_KEY }}" \
+            --key-alias "${EVIDENCE_KEY_ALIAS}"
           echo "Evidence attached: in-toto attestation to Release Bundle"
 
       # ---------------------------------------------------------------

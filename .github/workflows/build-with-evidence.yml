@@ -10,10 +10,11 @@ permissions:
   contents: read
 
 env:
-  DOCKER_REPO_DEV_LOCAL: evidence-demo-docker-dev-local
+  DOCKER_REPO_DEV_LOCAL: evi-demo-docker-dev-local
   DOCKER_VIRTUAL: evidence-demo-docker-dev-virtual
   GENERIC_REPO: evidence-demo-generic-dev
   IMAGE_NAME: evidence-demo-app
+  EVIDENCE_KEY_ALIAS: evidence-signing-key
 
 jobs:
   build-test-publish:
@@ -108,9 +109,11 @@ jobs:
           URL=$(echo "${{ vars.ARTIFACTORY_URL }}" | sed 's|^https://||')
           REPO_URL="${URL}/${DOCKER_VIRTUAL}"
           IMAGE_TAG="${REPO_URL}/${IMAGE_NAME}:${{ github.run_number }}"
+          IMAGE_LATEST="${REPO_URL}/${IMAGE_NAME}:latest"
 
           docker build -f Dockerfile . \
             --tag "${IMAGE_TAG}" \
+            --tag "${IMAGE_LATEST}" \
             --output=type=image --platform linux/amd64 \
             --metadata-file=build-metadata --push
 
@@ -129,6 +132,7 @@ jobs:
             --package-version "${{ github.run_number }}" \
             --package-repo-name "${DOCKER_REPO_DEV_LOCAL}" \
             --key "${{ secrets.PRIVATE_KEY }}" \
+            --key-alias "${EVIDENCE_KEY_ALIAS}" \
             --predicate ./test-evidence.json \
             --predicate-type https://jfrog.com/evidence/test-results/v1
           echo "Evidence attached: unit-test-results"
@@ -143,6 +147,7 @@ jobs:
             --package-version "${{ github.run_number }}" \
             --package-repo-name "${DOCKER_REPO_DEV_LOCAL}" \
             --key "${{ secrets.PRIVATE_KEY }}" \
+            --key-alias "${EVIDENCE_KEY_ALIAS}" \
             --predicate ./sonar-evidence.json \
             --predicate-type https://jfrog.com/evidence/sonarqube/v1
           echo "Evidence attached: sonarqube-quality-gate"
@@ -190,7 +195,8 @@ jobs:
             --build-number "${{ github.run_number }}" \
             --predicate ./build-signature.json \
             --predicate-type https://jfrog.com/evidence/build-signature/v1 \
-            --key "${{ secrets.PRIVATE_KEY }}"
+            --key "${{ secrets.PRIVATE_KEY }}" \
+            --key-alias "${EVIDENCE_KEY_ALIAS}"
           echo "Evidence attached: build-signature"
 
       # ---------------------------------------------------------------
@@ -264,7 +270,8 @@ jobs:
             --release-bundle-version "${{ github.run_number }}" \
             --predicate ./intoto-attestation.json \
             --predicate-type https://in-toto.io/attestation/v1 \
-            --key "${{ secrets.PRIVATE_KEY }}"
+            --key "${{ secrets.PRIVATE_KEY }}" \
+            --key-alias "${EVIDENCE_KEY_ALIAS}"
           echo "Evidence attached: in-toto attestation to Release Bundle"
 
       # ---------------------------------------------------------------

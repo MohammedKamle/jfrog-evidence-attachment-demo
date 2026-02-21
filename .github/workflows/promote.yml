@@ -85,7 +85,8 @@ jobs:
             --release-bundle-version "${{ inputs.bundle_version }}" \
             --predicate ./promotion-evidence.json \
             --predicate-type https://jfrog.com/evidence/promotion/v1 \
-            --key "${{ secrets.PRIVATE_KEY }}"
+            --key "${{ secrets.PRIVATE_KEY }}" \
+            --key-alias evidence-signing-key
           echo "Evidence attached: promotion-approval"
 
       # ---------------------------------------------------------------

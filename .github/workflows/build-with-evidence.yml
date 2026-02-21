@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 env:
-  DOCKER_REPO_DEV_LOCAL: evidence-demo-docker-dev-local
+  DOCKER_REPO_DEV_LOCAL: evi-demo-docker-dev-local
   DOCKER_VIRTUAL: evidence-demo-docker-dev-virtual
   GENERIC_REPO: evidence-demo-generic-dev
   IMAGE_NAME: evidence-demo-app

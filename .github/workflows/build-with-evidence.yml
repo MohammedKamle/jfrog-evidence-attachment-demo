@@ -108,9 +108,11 @@ jobs:
           URL=$(echo "${{ vars.ARTIFACTORY_URL }}" | sed 's|^https://||')
           REPO_URL="${URL}/${DOCKER_VIRTUAL}"
           IMAGE_TAG="${REPO_URL}/${IMAGE_NAME}:${{ github.run_number }}"
+          IMAGE_LATEST="${REPO_URL}/${IMAGE_NAME}:latest"
 
           docker build -f Dockerfile . \
             --tag "${IMAGE_TAG}" \
+            --tag "${IMAGE_LATEST}" \
             --output=type=image --platform linux/amd64 \
             --metadata-file=build-metadata --push
 

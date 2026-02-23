@@ -1,6 +1,6 @@
 package policy
 
-test_approved_when_all_evidence_present {
+test_approved_when_all_evidence_present if {
     approved with input as {
         "data": {
             "releaseBundleVersion": {
@@ -37,7 +37,7 @@ test_approved_when_all_evidence_present {
     }
 }
 
-test_not_approved_when_evidence_missing {
+test_not_approved_when_evidence_missing if {
     not approved with input as {
         "data": {
             "releaseBundleVersion": {

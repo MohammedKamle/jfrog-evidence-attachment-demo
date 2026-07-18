@@ -42,13 +42,11 @@ jobs:
         run: |
           echo "Promoting ${{ vars.BUNDLE_NAME }}:${{ inputs.bundle_version }} -> ${{ inputs.target_env }}"
 
-            # Added --copy-by-promotion flag to prevent overriding error
-            jf release-bundle-promote \
-            "${{ vars.BUNDLE_NAME }}" "${{ inputs.bundle_version }}" \
-            "${{ inputs.target_env }}" \
-            --signing-key demo-signing-key \
-            --sync=true \
-            --copy-by-promotion
+          jf release-bundle-promote \
+          "${{ vars.BUNDLE_NAME }}" "${{ inputs.bundle_version }}" \
+          "${{ inputs.target_env }}" \
+          --signing-key demo-signing-key \
+          --sync=true
 
           echo "Release Bundle promoted to ${{ inputs.target_env }}"
 
